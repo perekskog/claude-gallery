@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>__TITLE__</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    background: #000;
+    overflow: hidden;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  #frame {
+    display: grid;
+    position: fixed;
+    top: 0;
+    left: 0;
+    /* Fallback for the first paint before JS runs; overridden with an exact
+       pixel size from the visual viewport (see the Mobile Safari note in
+       the grid template — the same 100vh bug applies here). */
+    width: 100vw;
+    height: 100vh;
+    gap: 2px;
+    background: #000;
+  }
+  #top    { grid-column: 1 / 4; grid-row: 1; display: flex; flex-direction: row; gap: 2px; }
+  #bottom { grid-column: 1 / 4; grid-row: 3; display: flex; flex-direction: row; gap: 2px; }
+  #left   { grid-column: 1; grid-row: 2; display: flex; flex-direction: column; gap: 2px; }
+  #right  { grid-column: 3; grid-row: 2; display: flex; flex-direction: column; gap: 2px; }
+  #top .thumb, #bottom .thumb { flex: 1 1 0; min-width: 0; }
+  #left .thumb, #right .thumb { flex: 1 1 0; min-height: 0; }
+  .thumb {
+    position: relative;
+    overflow: hidden;
+    background: #111;
+  }
+  .thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    pointer-events: none;
+  }
+  #viewer {
+    grid-column: 2;
+    grid-row: 2;
+    background: #000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+  }
+  #viewer img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    pointer-events: none;
+  }
+  #hint {
+    /* A distinct box centered on top of the photo, not a banner tucked at
+       an edge or a subtle pill — feedback was that both of those were too
+       easy to miss against a photo. Solid background + border, deliberately
+       not blended into whatever image is behind it. */
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: min(90%, 420px);
+    box-sizing: border-box;
+    background: #000;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    color: #fff;
+    font-size: 15px;
+    font-weight: 600;
+    text-align: center;
+    line-height: 1.45;
+    padding: 20px 24px;
+    border-radius: 16px;
+    box-shadow: 0 10px 34px rgba(0, 0, 0, 0.65);
+    pointer-events: none;
+    z-index: 300;
+    opacity: 1;
+    transition: opacity 0.5s ease;
+  }
+  #hint.hidden {
+    opacity: 0;
+  }
+</style>
+</head>
+<body>
+
+<div id="frame">
+  <div id="top"></div>
+  <div id="right"></div>
+  <div id="bottom"></div>
+  <div id="left"></div>
+  <div id="viewer"><img id="viewer-img" src="" alt=""></div>
+</div>
+
+<div id="hint">Press &amp; drag the border to browse</div>
+
+<script>
+  // File list is injected by generate_contact_sheet.py
+  const files = __FILES_JSON__;
+
+  // Fisher-Yates shuffle, re-randomized on every page load
+  function shuffle(arr) {
+    for (let i = arr.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+    return arr;
+  }
+
+  const order = shuffle(files.slice());
+
+  const frame = document.getElementById('frame');
+  const topEl = document.getElementById('top');
+  const bottomEl = document.getElementById('bottom');
+  const leftEl = document.getElementById('left');
+  const rightEl = document.getElementById('right');
+  const viewerImg = document.getElementById('viewer-img');
+  let currentViewerSrc = null; // tracked separately from viewerImg.src to
+                                // reliably detect an actual photo switch
+                                // (see dismissHint below), rather than
+                                // relying on DOM attribute normalization
+
+  // Split n items across however many weights are given, proportionally to
+  // each weight, using largest-remainder rounding so the counts always add
+  // up to exactly n — every photo is shown, none dropped. Used both for
+  // splitting across the active sides' lengths and, more generally,
+  // wherever proportional whole-number counts are needed.
+  function distribute(n, weights) {
+    const sum = weights.reduce((a, b) => a + b, 0);
+    const raw = weights.map(w => (sum > 0 ? (n * w) / sum : 0));
+    const base = raw.map(Math.floor);
+    let remainder = n - base.reduce((a, b) => a + b, 0);
+    const fracs = raw.map((r, i) => ({ i, f: r - base[i] })).sort((a, b) => b.f - a.f);
+    for (let k = 0; k < remainder && k < fracs.length; k++) base[fracs[k].i]++;
+    return base; // same order as the input weights array
+  }
+
+  // Which sides of the frame are "in play" for a given photo count. Fewer
+  // photos means fewer sides: spreading, say, 3 photos across all four
+  // sides forces some side to hold just one photo spanning its *entire*
+  // length — full screen width for a lone top/bottom thumbnail, or the
+  // full inner height for a lone left/right one — cropping it into an
+  // unrecognizable sliver. Concentrating instead on just the right side
+  // (then adding left, then top, then finally bottom as the count grows)
+  // keeps every thumbnail at a reasonable, recognizable crop. Right/left
+  // come first because they only ever have to divide the *height*, which —
+  // since photos here are portrait and the page is confined to a portrait
+  // rect (see PHONE_ASPECT below) — is the more forgiving axis; a lone
+  // photo on a vertical side is merely tall, not razor-thin.
+  const SIDE_GROWTH_ORDER = ['right', 'left', 'top', 'bottom'];
+
+  // For the given set of active sides, search candidate border thicknesses
+  // s and, for each, split n photos across only those sides proportionally
+  // to each side's length (top/bottom get W, left/right get whatever inner
+  // height is left once any active top/bottom strip is carved out).
+  // Mirrors the grid template's "maximize the limiting dimension" scoring,
+  // generalized to a variable number of sides instead of a fixed four.
+  function solveFrame(activeSides, W, H, n) {
+    const hasTop = activeSides.includes('top');
+    const hasBottom = activeSides.includes('bottom');
+    const hasLeft = activeSides.includes('left');
+    const hasRight = activeSides.includes('right');
+
+    // Same "don't let thumbnails balloon just because there's slack" cap
+    // as before, independent of how many sides are active.
+    const capMaxS = Math.max(12, Math.min(
+      Math.floor(Math.min(W, H) / 2) - 4,
+      Math.round(Math.min(W, H) * 0.16),
+    ));
+
+    let bestS = 12, bestScore = -1;
+    let bestCounts = { top: 0, right: 0, bottom: 0, left: 0 };
+    for (let s = 12; s <= capMaxS; s++) {
+      const innerH = H - (hasTop ? s : 0) - (hasBottom ? s : 0);
+      if (innerH <= 0) continue;
+      const sides = [];
+      if (hasTop) sides.push({ key: 'top', weight: W });
+      if (hasRight) sides.push({ key: 'right', weight: innerH });
+      if (hasBottom) sides.push({ key: 'bottom', weight: W });
+      if (hasLeft) sides.push({ key: 'left', weight: innerH });
+      const counts = distribute(n, sides.map(d => d.weight));
+      let valid = true;
+      let score = Infinity;
+      sides.forEach((d, i) => {
+        if (counts[i] <= 0) { valid = false; return; }
+        score = Math.min(score, Math.min(d.weight / counts[i], s));
+      });
+      if (!valid || score <= bestScore) continue;
+      bestScore = score;
+      bestS = s;
+      bestCounts = { top: 0, right: 0, bottom: 0, left: 0 };
+      sides.forEach((d, i) => { bestCounts[d.key] = counts[i]; });
+    }
+
+    return { s: bestS, counts: bestCounts };
+  }
+
+  // Decide how many sides to actually use, by trying solveFrame with more
+  // and more of them and backing off as soon as adding one would starve
+  // some side below MIN_PER_SIDE (5). A fixed formula based on n alone isn't
+  // enough here: distribute() splits photos across active sides by their
+  // *length* (top/bottom get the full width W, left/right only get
+  // whatever inner height remains), so which side ends up starved depends
+  // on the viewport's proportions too, not just the photo count — e.g. 7
+  // photos across right+left+top can leave top with just 1 (spanning the
+  // full width), even though 7 "sounds like enough" for 3 sides in the
+  // abstract. Actually solving each candidate and checking its real
+  // resulting counts catches that; a static count threshold wouldn't.
+  function chooseActiveSides(W, H, n) {
+    const MIN_PER_SIDE = 5;
+    let chosen = SIDE_GROWTH_ORDER.slice(0, 1);
+    let chosenResult = solveFrame(chosen, W, H, n);
+    for (let k = 2; k <= SIDE_GROWTH_ORDER.length; k++) {
+      const candidate = SIDE_GROWTH_ORDER.slice(0, k);
+      const result = solveFrame(candidate, W, H, n);
+      const minCount = Math.min(...candidate.map(side => result.counts[side]));
+      if (minCount < MIN_PER_SIDE) break;
+      chosen = candidate;
+      chosenResult = result;
+    }
+    return { activeSides: chosen, result: chosenResult };
+  }
+
+  function fillSide(el, imgs, dir) {
+    el.innerHTML = '';
+    el.style.flexDirection = dir;
+    imgs.forEach(name => {
+      const thumb = document.createElement('div');
+      thumb.className = 'thumb';
+      const img = document.createElement('img');
+      img.src = name;
+      img.dataset.src = name;
+      img.loading = 'eager';
+      img.draggable = false;
+      thumb.appendChild(img);
+      el.appendChild(thumb);
+    });
+  }
+
+  // Photos are typically shot in portrait on a phone. On a desktop browser
+  // the window is usually landscape, which — if the frame used the full
+  // window — would surround the viewer's photo with black letterboxing.
+  // Instead, the whole page is confined to a portrait, phone-shaped rect
+  // (contain-fit inside the actual window, centered) so photos fill the
+  // viewer properly regardless of how wide the browser window is.
+  //
+  // The ratio is the *visible* mobile browser viewport, not the raw device
+  // screen. A phone's screen is ~9:19.5, but the address bar and bottom
+  // toolbar/home-indicator crop that down in practice — what a mobile
+  // visitor actually sees (and what this page already sizes itself to on a
+  // real phone, via visualViewport) is closer to ~9:16. Using the true
+  // device ratio here would simulate a taller rect than real phones
+  // actually show, leaving more unused space on desktop than necessary.
+  const PHONE_ASPECT = 9 / 16; // width / height, ~visible mobile viewport
+
+  // Sized from the visual viewport (not CSS vh units) for the same reason
+  // as the grid template: mobile Safari's 100vh overflows the actually
+  // visible area.
+  function layoutFrame() {
+    const n = order.length;
+    const vv = window.visualViewport;
+    const winW = vv ? vv.width : window.innerWidth;
+    const winH = vv ? vv.height : window.innerHeight;
+
+    let W = winW, H = W / PHONE_ASPECT;
+    if (H > winH) { H = winH; W = H * PHONE_ASPECT; }
+    const left = (winW - W) / 2;
+    const top = (winH - H) / 2;
+
+    frame.style.width = W + 'px';
+    frame.style.height = H + 'px';
+    frame.style.left = left + 'px';
+    frame.style.top = top + 'px';
+
+    const { activeSides, result } = chooseActiveSides(W, H, n);
+    const hasTop = activeSides.includes('top');
+    const hasBottom = activeSides.includes('bottom');
+    const hasLeft = activeSides.includes('left');
+    const hasRight = activeSides.includes('right');
+
+    const { s: bestS, counts } = result;
+
+    // Inactive sides collapse to a 0-width/height track instead of an
+    // empty strip taking up space — the viewer expands to fill the room.
+    frame.style.gridTemplateColumns = `${hasLeft ? bestS : 0}px 1fr ${hasRight ? bestS : 0}px`;
+    frame.style.gridTemplateRows = `${hasTop ? bestS : 0}px 1fr ${hasBottom ? bestS : 0}px`;
+
+    let idx = 0;
+    const topImgs = order.slice(idx, idx += counts.top);
+    const rightImgs = order.slice(idx, idx += counts.right);
+    const bottomImgs = order.slice(idx, idx += counts.bottom);
+    const leftImgs = order.slice(idx, idx += counts.left);
+
+    fillSide(topEl, topImgs, 'row');
+    fillSide(rightEl, rightImgs, 'column');
+    fillSide(bottomEl, bottomImgs, 'row');
+    fillSide(leftEl, leftImgs, 'column');
+
+    if (!currentViewerSrc) {
+      currentViewerSrc = order[0];
+      viewerImg.src = order[0];
+    }
+  }
+
+  // First-time users see a full photo already sitting in the viewer with
+  // no obvious sign the border thumbnails around it are interactive at
+  // all. A brief hint spells out the gesture. It only dismisses once the
+  // user actually succeeds at switching the viewer to a *different* photo
+  // than the one it started on — pressing down without moving anywhere
+  // just re-shows the same starting photo and hasn't actually taught them
+  // that dragging changes anything, so that alone shouldn't dismiss it.
+  // A timeout is still the fallback for anyone who never interacts at all.
+  const hint = document.getElementById('hint');
+  const hintTimer = setTimeout(() => hint.classList.add('hidden'), 5000);
+  function dismissHint() {
+    clearTimeout(hintTimer);
+    hint.classList.add('hidden');
+  }
+
+  layoutFrame();
+  window.addEventListener('resize', layoutFrame);
+  window.addEventListener('orientationchange', layoutFrame);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', layoutFrame);
+  }
+
+  // Same press-and-drag gesture as the grid template, unified across touch,
+  // mouse, and pen via Pointer Events: press on a border thumbnail to show
+  // it in the central viewer, drag across other thumbnails to swap the
+  // preview, release to leave the last-previewed photo showing. Unlike the
+  // grid template there's no separate "revealed" state to return to on
+  // release — the border thumbnails are always visible, so the viewer
+  // simply keeps the last image instead of hiding anything.
+  let dragging = false;
+
+  function showAt(x, y) {
+    const el = document.elementFromPoint(x, y);
+    if (!el) return;
+    const thumb = el.closest('.thumb');
+    const img = thumb ? thumb.querySelector('img') : null;
+    if (img && img.dataset.src !== currentViewerSrc) {
+      currentViewerSrc = img.dataset.src;
+      viewerImg.src = img.dataset.src;
+      dismissHint();
+    }
+  }
+
+  frame.addEventListener('pointerdown', e => {
+    dragging = true;
+    frame.setPointerCapture(e.pointerId);
+    showAt(e.clientX, e.clientY);
+  });
+
+  frame.addEventListener('pointermove', e => {
+    if (dragging) showAt(e.clientX, e.clientY);
+  });
+
+  frame.addEventListener('pointerup', () => { dragging = false; });
+  frame.addEventListener('pointercancel', () => { dragging = false; });
+</script>
+
+</body>
+</html>

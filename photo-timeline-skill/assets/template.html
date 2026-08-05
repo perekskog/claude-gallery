@@ -1,0 +1,414 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>__TITLE__</title>
+<style>
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    background: #000;
+    overflow: hidden;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  #page {
+    display: flex;
+    flex-direction: row;
+    position: fixed;
+    top: 0;
+    left: 0;
+    /* Fallback for the first paint before JS runs; overridden with an exact
+       pixel rect from the visual viewport (see PHONE_ASPECT below). */
+    width: 100vw;
+    height: 100vh;
+    background: #000;
+  }
+  #viewer {
+    flex: 1 1 auto;
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    background: #000;
+  }
+  #viewer img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+  }
+  #info-overlay {
+    position: absolute;
+    left: 50%;
+    bottom: 20px;
+    transform: translateX(-50%);
+    max-width: 85%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    pointer-events: none;
+  }
+  #note-label,
+  #date-label {
+    background: rgba(0, 0, 0, 0.55);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    color: #fff;
+    padding: 7px 16px;
+    border-radius: 14px;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+  }
+  #note-label.visible,
+  #date-label.visible {
+    opacity: 1;
+  }
+  #note-label {
+    display: none;
+    font-size: 14px;
+    line-height: 1.35;
+    text-align: center;
+  }
+  #note-label.visible {
+    display: block;
+  }
+  #date-label {
+    font-size: 14px;
+    letter-spacing: 0.02em;
+    border-radius: 999px;
+    white-space: nowrap;
+  }
+  #timeline {
+    flex: 0 0 auto;
+    position: relative;
+    background: #000;
+  }
+  #timeline .axis {
+    position: absolute;
+    left: 50%;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: rgba(255, 255, 255, 0.25);
+    transform: translateX(-50%);
+  }
+  #timeline .dot {
+    position: absolute;
+    left: 50%;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.55);
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+  }
+  #timeline .dot.active {
+    background: #fff;
+    box-shadow: 0 0 8px rgba(255, 255, 255, 0.9);
+  }
+  #timeline .edge-label {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 10px;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+  #hint {
+    /* A distinct box centered on top of the photo, not a banner tucked at
+       an edge or a subtle pill — feedback was that both of those were too
+       easy to miss against a photo. Solid background + border, deliberately
+       not blended into whatever image is behind it. */
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: min(90%, 420px);
+    box-sizing: border-box;
+    background: #000;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    color: #fff;
+    font-size: 15px;
+    font-weight: 600;
+    text-align: center;
+    line-height: 1.45;
+    padding: 20px 24px;
+    border-radius: 16px;
+    box-shadow: 0 10px 34px rgba(0, 0, 0, 0.65);
+    pointer-events: none;
+    z-index: 300;
+    opacity: 1;
+    transition: opacity 0.5s ease;
+  }
+  #hint.hidden {
+    opacity: 0;
+  }
+</style>
+</head>
+<body>
+
+<div id="page">
+  <div id="viewer">
+    <img id="viewer-img" src="" alt="">
+    <div id="info-overlay">
+      <div id="note-label"></div>
+      <div id="date-label"></div>
+    </div>
+  </div>
+  <div id="timeline">
+    <div class="axis"></div>
+  </div>
+</div>
+
+<div id="hint">Drag the timeline on the right to browse by date</div>
+
+<script>
+  // Photos, capture dates, and notes injected by generate_timeline.py.
+  // Each entry: { file: "IMG_1234.jpg", t: <epoch ms>, note: "" }
+  // note comes from the sidecar photo-notes.json file in the image folder
+  // — edit that file and re-run the script to change captions.
+  const photos = __PHOTOS_JSON__;
+
+  // Chronological order, ascending. Unlike the contact-sheet skill's
+  // grid/border layouts, this is deliberately NOT shuffled — the entire
+  // point of a timeline is showing the real sequence.
+  photos.sort((a, b) => a.t - b.t);
+
+  // Photos are typically shot in portrait on a phone. On a desktop browser
+  // the window is usually landscape, which — if the page used the full
+  // window — would surround the viewer's photo with black letterboxing.
+  // Instead, the whole page is confined to a portrait, phone-shaped rect
+  // (contain-fit inside the actual window, centered). The ratio targets
+  // the *visible* mobile browser viewport (after the address bar/toolbar
+  // crop it), not the raw device screen — see the contact-sheet skill's
+  // notes for the full reasoning. Tweak here if needed.
+  const PHONE_ASPECT = 9 / 16;
+
+  const page = document.getElementById('page');
+  const viewer = document.getElementById('viewer');
+  const viewerImg = document.getElementById('viewer-img');
+  const dateLabel = document.getElementById('date-label');
+  const noteLabel = document.getElementById('note-label');
+  const timeline = document.getElementById('timeline');
+
+  function formatDate(t) {
+    return new Date(t).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  }
+
+  // Build the dot for every photo once; positions are recomputed on every
+  // layout() pass (load, resize, orientation change).
+  const dotEls = photos.map(() => {
+    const dot = document.createElement('div');
+    dot.className = 'dot';
+    timeline.appendChild(dot);
+    return dot;
+  });
+
+  const firstLabel = document.createElement('div');
+  firstLabel.className = 'edge-label';
+  firstLabel.style.top = '4px';
+  firstLabel.textContent = formatDate(photos[0].t);
+  timeline.appendChild(firstLabel);
+
+  const lastLabel = document.createElement('div');
+  lastLabel.className = 'edge-label';
+  lastLabel.style.bottom = '4px';
+  lastLabel.textContent = formatDate(photos[photos.length - 1].t);
+  timeline.appendChild(lastLabel);
+
+  let currentIndex = -1;
+
+  function updateInfoOverlay(photo) {
+    dateLabel.textContent = formatDate(photo.t);
+    dateLabel.classList.add('visible');
+    if (photo.note) {
+      noteLabel.textContent = photo.note;
+      noteLabel.classList.add('visible');
+    } else {
+      noteLabel.classList.remove('visible');
+    }
+  }
+
+  function setActive(index) {
+    if (index === currentIndex) return;
+    // Only counts as the user having "switched" (and so only dismisses the
+    // hint below) once there was already a photo showing — the very first
+    // call, from layout() picking the starting photo, isn't a switch the
+    // user made, so it shouldn't be treated as proof they've learned the
+    // gesture.
+    if (currentIndex >= 0) {
+      dotEls[currentIndex].classList.remove('active');
+      dismissHint();
+    }
+    currentIndex = index;
+    dotEls[currentIndex].classList.add('active');
+    viewerImg.src = photos[index].file;
+    updateInfoOverlay(photos[index]);
+  }
+
+  // Notes are baked into `photos` at generation time so the page works
+  // fully standalone/offline, but the user asked for edits to
+  // photo-notes.json to show up just by reloading the page — no re-run of
+  // generate_timeline.py needed. So on load, re-fetch the sidecar file and
+  // merge any fresher note text over the baked-in values, refreshing the
+  // overlay if the currently displayed photo's note changed.
+  //
+  // This can silently fail: browsers vary on whether a file:// page is
+  // allowed to fetch a sibling file:// resource (Chrome blocks it by
+  // default, Firefox generally allows it). When it fails, the page just
+  // keeps showing the baked-in notes from the last generation — serve the
+  // folder over a local HTTP server (e.g. `python3 -m http.server`) for
+  // guaranteed live reloads regardless of browser.
+  async function loadFreshNotes() {
+    try {
+      const res = await fetch('photo-notes.json', { cache: 'no-store' });
+      if (!res.ok) return;
+      const fresh = await res.json();
+      if (!fresh || typeof fresh !== 'object') return;
+      let changedCurrent = false;
+      photos.forEach(p => {
+        if (Object.prototype.hasOwnProperty.call(fresh, p.file)) {
+          const next = fresh[p.file] || '';
+          if (next !== p.note) {
+            p.note = next;
+            if (currentIndex >= 0 && photos[currentIndex] === p) changedCurrent = true;
+          }
+        }
+      });
+      if (changedCurrent) updateInfoOverlay(photos[currentIndex]);
+    } catch (err) {
+      // See comment above — expected in some browsers under file://.
+    }
+  }
+
+  // Position the timeline dots. Each dot starts proportional to its photo's
+  // timestamp between the earliest and latest date in the set (top =
+  // earliest, bottom = latest), then a monotonic minimum-gap pass spreads
+  // out dots that would otherwise land on top of each other — e.g. several
+  // photos taken the same day — while preserving chronological order.
+  // Sized from the visual viewport (not CSS vh units) for the same Mobile
+  // Safari 100vh reason as the contact-sheet skill's templates.
+  function layout() {
+    const vv = window.visualViewport;
+    const winW = vv ? vv.width : window.innerWidth;
+    const winH = vv ? vv.height : window.innerHeight;
+
+    let w = winW, h = w / PHONE_ASPECT;
+    if (h > winH) { h = winH; w = h * PHONE_ASPECT; }
+    const left = (winW - w) / 2;
+    const top = (winH - h) / 2;
+
+    page.style.width = w + 'px';
+    page.style.height = h + 'px';
+    page.style.left = left + 'px';
+    page.style.top = top + 'px';
+
+    const timelineW = Math.max(40, Math.round(w * 0.12));
+    timeline.style.width = timelineW + 'px';
+
+    const dotSize = Math.max(5, Math.min(10, Math.round(timelineW * 0.18)));
+    const padTop = 24, padBottom = 24;
+    const lineH = Math.max(1, h - padTop - padBottom);
+    const n = photos.length;
+
+    const minT = photos[0].t;
+    const maxT = photos[photos.length - 1].t;
+    const span = maxT - minT;
+
+    const ys = photos.map((p, i) => {
+      if (span > 0) return padTop + ((p.t - minT) / span) * lineH;
+      return n > 1 ? padTop + (i / (n - 1)) * lineH : padTop + lineH / 2;
+    });
+
+    const minGap = n > 1 ? Math.max(dotSize + 3, 8) : 0;
+    for (let i = 1; i < n; i++) {
+      if (ys[i] - ys[i - 1] < minGap) ys[i] = ys[i - 1] + minGap;
+    }
+    const bottomLimit = padTop + lineH;
+    const overflow = ys[n - 1] - bottomLimit;
+    if (overflow > 0) {
+      for (let i = n - 1; i >= 0; i--) {
+        ys[i] -= overflow;
+        if (i > 0 && ys[i] - ys[i - 1] >= minGap) break;
+      }
+    }
+
+    dotEls.forEach((dot, i) => {
+      dot.style.width = dotSize + 'px';
+      dot.style.height = dotSize + 'px';
+      dot.style.top = ys[i] + 'px';
+    });
+
+    if (currentIndex < 0) setActive(0);
+  }
+
+  layout();
+  window.addEventListener('resize', layout);
+  window.addEventListener('orientationchange', layout);
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', layout);
+  }
+
+  loadFreshNotes();
+
+  // The timeline strip is a thin column of small dots along the right
+  // edge — easy to miss as interactive at all, unlike the contact-sheet
+  // skill's grid/border layouts where the whole screen (or a visible
+  // border) responds to touch. A brief hint spells out where to drag. It
+  // only dismisses once the user actually succeeds at switching to a
+  // *different* photo than the starting one (see setActive) — pressing
+  // down on the dot that's already showing hasn't taught them dragging
+  // does anything, so that alone shouldn't dismiss it. A timeout is still
+  // the fallback for anyone who never interacts at all.
+  const hint = document.getElementById('hint');
+  const hintTimer = setTimeout(() => hint.classList.add('hidden'), 5000);
+  function dismissHint() {
+    clearTimeout(hintTimer);
+    hint.classList.add('hidden');
+  }
+
+  // Press-and-drag along the timeline scrubs through time — the same
+  // Pointer Events gesture as the contact-sheet skill's grid/border
+  // layouts. Instead of hit-testing a specific thumbnail under the pointer,
+  // it finds whichever dot is vertically closest to the pointer: dots are
+  // deliberately small, so exact hits would be fiddly, and "nearest"
+  // means dragging works smoothly anywhere along the strip. Release leaves
+  // the last-previewed photo showing, same reasoning as the border layout
+  // — there's no separate "revealed" state to return to, the timeline is
+  // always visible.
+  function nearestIndexToY(clientY) {
+    const rect = timeline.getBoundingClientRect();
+    const y = clientY - rect.top;
+    let best = 0, bestDist = Infinity;
+    for (let i = 0; i < dotEls.length; i++) {
+      const dy = Math.abs(parseFloat(dotEls[i].style.top) - y);
+      if (dy < bestDist) { bestDist = dy; best = i; }
+    }
+    return best;
+  }
+
+  let dragging = false;
+
+  timeline.addEventListener('pointerdown', e => {
+    dragging = true;
+    timeline.setPointerCapture(e.pointerId);
+    setActive(nearestIndexToY(e.clientY));
+  });
+
+  timeline.addEventListener('pointermove', e => {
+    if (dragging) setActive(nearestIndexToY(e.clientY));
+  });
+
+  timeline.addEventListener('pointerup', () => { dragging = false; });
+  timeline.addEventListener('pointercancel', () => { dragging = false; });
+</script>
+
+</body>
+</html>
