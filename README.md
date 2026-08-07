@@ -10,6 +10,29 @@ Full requirements, design rationale, and known trade-offs:
 [docs/description.md](docs/description.md) (kept up to date as
 requirements evolve).
 
+## Idea
+
+An alternative to hunting for and installing an off-the-shelf photo
+gallery library or template: instead, generate a gallery from scratch,
+purpose-built for the specific kind of photo set and browsing need at
+hand.
+
+- **contact-sheet** is for phone-shot portrait photos with no meaningful
+  order to preserve — so it shuffles them, and the layout (grid or border)
+  is optimized to show as many as possible at once without favoring any
+  single photo.
+- **photo-timeline** is for photos where *when* they were taken is the
+  meaningful dimension — it parses a specific filename convention to
+  extract capture dates and lays the photos out chronologically, with
+  clusters and gaps visible.
+
+An off-the-shelf gallery comes with a generic, configurable UI that has to
+cover every use case at once, and still needs bending to fit a particular
+dataset. Generating the gallery instead means the layout and interaction
+can be exactly right for the photos it's for from the start, while the
+portrait viewport and press-and-drag gesture stay shared building blocks
+reused across both.
+
 ## Usage
 
 ```bash
