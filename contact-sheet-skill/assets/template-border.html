@@ -110,16 +110,9 @@
   // File list is injected by generate_contact_sheet.py
   const files = __FILES_JSON__;
 
-  // Fisher-Yates shuffle, re-randomized on every page load
-  function shuffle(arr) {
-    for (let i = arr.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [arr[i], arr[j]] = [arr[j], arr[i]];
-    }
-    return arr;
-  }
-
-  const order = shuffle(files.slice());
+  // Filename order (files is already sorted by generate_contact_sheet.py) —
+  // stays identical across reloads, unlike the grid layout's shuffle.
+  const order = files.slice();
 
   const frame = document.getElementById('frame');
   const topEl = document.getElementById('top');
@@ -209,7 +202,7 @@
 
   // Decide how many sides to actually use, by trying solveFrame with more
   // and more of them and backing off as soon as adding one would starve
-  // some side below MIN_PER_SIDE (5). A fixed formula based on n alone isn't
+  // some side below MIN_PER_SIDE (10). A fixed formula based on n alone isn't
   // enough here: distribute() splits photos across active sides by their
   // *length* (top/bottom get the full width W, left/right only get
   // whatever inner height remains), so which side ends up starved depends
@@ -219,7 +212,7 @@
   // abstract. Actually solving each candidate and checking its real
   // resulting counts catches that; a static count threshold wouldn't.
   function chooseActiveSides(W, H, n) {
-    const MIN_PER_SIDE = 5;
+    const MIN_PER_SIDE = 10;
     let chosen = SIDE_GROWTH_ORDER.slice(0, 1);
     let chosenResult = solveFrame(chosen, W, H, n);
     for (let k = 2; k <= SIDE_GROWTH_ORDER.length; k++) {

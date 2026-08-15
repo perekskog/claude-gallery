@@ -1,10 +1,11 @@
 # Photo galleries: contact-sheet & photo-timeline
 
 Two standalone, dependency-free HTML skills for browsing a folder of
-photos. `contact-sheet` shows all photos at once in shuffled order (grid
-or border layout); `photo-timeline` browses chronologically based on the
-capture date extracted from each filename. Both share the same
-press-and-drag gesture (Pointer Events) and simulated portrait viewport.
+photos. `contact-sheet` shows all photos at once — shuffled order for the
+grid layout, filename order for the border layout; `photo-timeline`
+browses chronologically based on the capture date extracted from each
+filename. Both share the same press-and-drag gesture (Pointer Events) and
+simulated portrait viewport.
 
 Full requirements, design rationale, and known trade-offs:
 [docs/description.md](docs/description.md) (kept up to date as
@@ -17,10 +18,11 @@ gallery library or template: instead, generate a gallery from scratch,
 purpose-built for the specific kind of photo set and browsing need at
 hand.
 
-- **contact-sheet** is for phone-shot portrait photos with no meaningful
-  order to preserve — so it shuffles them, and the layout (grid or border)
-  is optimized to show as many as possible at once without favoring any
-  single photo.
+- **contact-sheet** is for phone-shot portrait photos: the grid layout has
+  no meaningful order to preserve, so it shuffles on every load, while the
+  border layout keeps a stable filename order for a revisitable browsing
+  sequence. Both are optimized to show as many photos as possible at once
+  without favoring any single one.
 - **photo-timeline** is for photos where *when* they were taken is the
   meaningful dimension — it parses a specific filename convention to
   extract capture dates and lays the photos out chronologically, with

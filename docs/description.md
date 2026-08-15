@@ -53,8 +53,9 @@ Filename convention for the current dataset: `Pe_YYMMDD_TaO_593_IMG_NNNN.jpg`
 
 ## Skill 1: `contact-sheet-skill`
 
-Purpose: show all photos in a folder at once, in shuffled order
-(re-shuffled on every page load), with the ability to magnify one photo at
+Purpose: show all photos in a folder at once — order depends on the
+layout (grid: shuffled, re-shuffled on every page load; border: filename
+order, stable across reloads) — with the ability to magnify one photo at
 a time via press-and-drag.
 
 CLI: `python generate_contact_sheet.py <photo-folder> [-o OUTPUT] [-t TITLE]
@@ -81,11 +82,18 @@ CLI: `python generate_contact_sheet.py <photo-folder> [-o OUTPUT] [-t TITLE]
 
 - Thumbnails line the edges of the screen (top/right/bottom/left strips)
   around a central, always-visible viewer.
+- **Filename order, not shuffled** — unlike the grid layout, the border
+  layout shows photos in the same order every time (whatever
+  `generate_contact_sheet.py` sorted the files into), stable across
+  reloads. This was a deliberate change from an earlier shuffled version,
+  since the border is meant to be a revisitable, predictable browsing
+  order.
 - Adaptive number of active sides (`chooseActiveSides(W, H, n)`): grows
   from right-only → right+left → right+left+top → all four, but only when
   each active side can actually get at least `MIN_PER_SIDE` photos (now
-  set to 5, after iterative tuning based on user testing: 2 was too low,
-  so was 3 — 9 photos should still show on the right edge alone). The
+  set to 10, doubled from 5 after user feedback that noticeably more
+  photos should still fit on a single side before spilling onto a second
+  — the original tuning had gone 2 → 3 → 5 for the same reason). The
   computation works by actually solving each candidate configuration
   (`solveFrame`), not a static formula, since the distribution depends on
   the screen's proportions (top/bottom get width `W`, left/right get
