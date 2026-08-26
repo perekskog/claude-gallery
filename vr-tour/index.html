@@ -181,6 +181,7 @@ let fov = 90;
 const MIN_FOV = 25, MAX_FOV = 100;
 let currentSceneId = null;
 let currentHotspots = [];
+let currentHeadingOffset = 0;
 const raycaster = new THREE.Raycaster();
 let downX = 0, downY = 0;
 const CLICK_THRESHOLD = 6; // px of movement below which a pointer down/up counts as a click
@@ -225,7 +226,7 @@ function init() {
   setTimeout(() => document.getElementById('hint').classList.add('hidden'), 5000);
 }
 
-function loadScene(id) {
+function loadScene(id, entryLon, entryLat) {
   const def = SCENES[id];
   if (!def) {
     showError('Okänd scen: "' + id + '"');
@@ -233,8 +234,13 @@ function loadScene(id) {
   }
   currentSceneId = id;
   currentHotspots = def.hotspots || [];
-  lon = targetLon = def.startLon || 0;
-  lat = targetLat = def.startLat || 0;
+  currentHeadingOffset = def.headingOffset || 0;
+  sphere.rotation.y = THREE.MathUtils.degToRad(currentHeadingOffset);
+  // A hotspot can override which direction the new scene starts facing
+  // (e.g. "arriving from the north" vs "from the south"). Falls back to
+  // the scene's own startLon/startLat when no override is given.
+  lon = targetLon = (typeof entryLon === 'number') ? entryLon : (def.startLon || 0);
+  lat = targetLat = (typeof entryLat === 'number') ? entryLat : (def.startLat || 0);
 
   document.getElementById('loading').style.display = 'flex';
   document.getElementById('error').style.display = 'none';
@@ -372,7 +378,7 @@ function renderHotspots() {
     el.title = h.label || '';
     el.style.pointerEvents = 'auto';
     el.addEventListener('click', function () {
-      if (h.target && SCENES[h.target]) loadScene(h.target);
+      if (h.target && SCENES[h.target]) loadScene(h.target, h.entryLon, h.entryLat);
     });
     layer.appendChild(el);
     h._el = el;
@@ -382,16 +388,26 @@ function renderHotspots() {
 function projectHotspots() {
   if (!currentHotspots.length) return;
   const w = window.innerWidth, hgt = window.innerHeight;
+  const offsetRad = THREE.MathUtils.degToRad(currentHeadingOffset);
+  const cosO = Math.cos(offsetRad), sinO = Math.sin(offsetRad);
   currentHotspots.forEach(function (h) {
     if (!h._el) return;
     const phi = THREE.MathUtils.degToRad(90 - h.lat);
     const theta = THREE.MathUtils.degToRad(h.lon);
+    // Photo-local position (same frame click-to-log reports lon/lat in).
+    const localX = 500 * Math.sin(phi) * Math.cos(theta);
+    const localY = 500 * Math.cos(phi);
+    const localZ = 500 * Math.sin(phi) * Math.sin(theta);
+    // Rotate by the scene's headingOffset (same rotation the sphere
+    // mesh itself has) to get the marker's actual current world
+    // position — so it stays glued to the same spot on the photo no
+    // matter what headingOffset is set to.
     const pos = new THREE.Vector3(
-      500 * Math.sin(phi) * Math.cos(theta),
-      500 * Math.cos(phi),
-      500 * Math.sin(phi) * Math.sin(theta)
+      localX * cosO + localZ * sinO,
+      localY,
+      -localX * sinO + localZ * cosO
     );
-    const projected = pos.clone().project(camera);
+    const projected = pos.project(camera);
     const behind = projected.z > 1;
     if (behind) {
       h._el.style.display = 'none';
@@ -416,9 +432,15 @@ function handleClick(clientX, clientY) {
   if (!hits.length) return;
 
   const p = hits[0].point;
-  // p is already in the same lon/lat convention used by the camera
-  // target formula and by projectHotspots() — no coordinate flip needed.
-  const tx = p.x, ty = p.y, tz = p.z;
+  // p is in world space, which includes the scene's headingOffset
+  // rotation (sphere.rotation.y). Undo that rotation so the logged
+  // lon/lat is in the same "tour space" used by hotspots and startLon,
+  // regardless of how this particular photo happens to be rotated.
+  const offsetRad = THREE.MathUtils.degToRad(currentHeadingOffset);
+  const cosO = Math.cos(offsetRad), sinO = Math.sin(offsetRad);
+  const tx = p.x * cosO - p.z * sinO;
+  const ty = p.y;
+  const tz = p.x * sinO + p.z * cosO;
   const r = Math.sqrt(tx * tx + ty * ty + tz * tz);
   const phi = Math.acos(THREE.MathUtils.clamp(ty / r, -1, 1));
   let lonDeg = THREE.MathUtils.radToDeg(Math.atan2(tz, tx));
