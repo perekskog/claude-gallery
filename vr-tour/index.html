@@ -103,6 +103,25 @@
   .zoom-btn:active {
     background: rgba(255,255,255,0.2);
   }
+  #live-coords {
+    position: fixed;
+    top: 18px;
+    left: 18px;
+    background: rgba(0,0,0,0.45);
+    color: #fff;
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.5;
+    z-index: 5;
+    display: none;
+    pointer-events: none;
+    white-space: nowrap;
+  }
+  #live-coords.visible {
+    display: block;
+  }
   /* Hotspot markers (used once a scene defines hotspots) */
   .hotspot {
     position: absolute;
@@ -161,7 +180,9 @@
 <div id="zoom-controls">
   <div class="zoom-btn" id="zoom-in">+</div>
   <div class="zoom-btn" id="zoom-out">−</div>
+  <div class="zoom-btn" id="coords-toggle" title="Visa/dölj lon/lat">◎</div>
 </div>
+<div id="live-coords"></div>
 <div id="hint">Dra för att titta runt · Nyp/scrolla för att zooma</div>
 <div id="coord-toast"></div>
 
@@ -182,6 +203,7 @@ const MIN_FOV = 25, MAX_FOV = 100;
 let currentSceneId = null;
 let currentHotspots = [];
 let currentHeadingOffset = 0;
+let showLiveCoords = false;
 const raycaster = new THREE.Raycaster();
 let downX = 0, downY = 0;
 const CLICK_THRESHOLD = 6; // px of movement below which a pointer down/up counts as a click
@@ -218,8 +240,12 @@ function init() {
 
   document.getElementById('zoom-in').addEventListener('click', () => setZoom(fov - 10));
   document.getElementById('zoom-out').addEventListener('click', () => setZoom(fov + 10));
+  document.getElementById('coords-toggle').addEventListener('click', toggleLiveCoords);
 
   window.addEventListener('resize', onResize);
+  window.addEventListener('keydown', function (e) {
+    if (e.key === 'c' || e.key === 'C') toggleLiveCoords();
+  });
 
   container.addEventListener('mousedown', hideHintOnce, { once: true });
   container.addEventListener('touchstart', hideHintOnce, { once: true });
@@ -488,6 +514,20 @@ function animate() {
   camera.lookAt(target);
   renderer.render(scene, camera);
   projectHotspots();
+  updateLiveCoords();
+}
+
+function toggleLiveCoords() {
+  showLiveCoords = !showLiveCoords;
+  document.getElementById('live-coords').classList.toggle('visible', showLiveCoords);
+}
+
+function updateLiveCoords() {
+  if (!showLiveCoords) return;
+  let displayLon = lon % 360;
+  if (displayLon < 0) displayLon += 360;
+  document.getElementById('live-coords').innerHTML =
+    'lon: ' + displayLon.toFixed(1) + '<br>lat: ' + lat.toFixed(1);
 }
 </script>
 </body>
