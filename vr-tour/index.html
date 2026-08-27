@@ -150,10 +150,11 @@
      own attributes (title/text) and no scene navigation. */
   .infobox-marker {
     position: absolute;
+    top: 0;
+    left: 0;
     width: 34px;
     height: 34px;
-    margin-left: -17px;
-    margin-top: -17px;
+    transform: translate(-50%, -50%);
     border-radius: 50%;
     background: rgba(40,90,210,0.9);
     border: 2px solid rgba(0,0,0,0.4);
@@ -175,6 +176,8 @@
   }
   .infobox-panel {
     position: absolute;
+    top: 0;
+    left: 0;
     max-width: 260px;
     background: rgba(0,0,0,0.5);
     color: #fff;
@@ -186,8 +189,6 @@
     pointer-events: auto;
     display: none;
     transform: translate(-50%, -50%);
-    transform-style: preserve-3d;
-    backface-visibility: hidden;
     z-index: 6;
   }
   .infobox-panel.visible {
@@ -249,7 +250,6 @@
 <div id="error"></div>
 <div id="canvas-container"></div>
 <div id="hotspot-layer" style="position:fixed; top:0; left:0; width:100vw; height:100vh; pointer-events:none; z-index:4;"></div>
-<div id="infobox-layer" style="position:fixed; top:0; left:0; width:100vw; height:100vh; pointer-events:none; z-index:4;"></div>
 <div id="zoom-controls">
   <div class="zoom-btn" id="zoom-in">+</div>
   <div class="zoom-btn" id="zoom-out">−</div>
@@ -260,13 +260,18 @@
 <div id="coord-toast"></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<!-- Renders real DOM elements as objects inside the same 3D scene and
+     camera as the panorama sphere, so info boxes get correct perspective
+     and rotation automatically as you look around — instead of a 2D CSS
+     approximation layered on top that never quite matches the real view. -->
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/renderers/CSS3DRenderer.js"></script>
 <!-- Scene/hotspot definitions live in their own file so they can be
      edited without touching the viewer logic below. The "?v=" query
      string is a cache-buster: it changes on every page load, so
      browsers always fetch the latest scenes.js instead of a cached copy. -->
 <script>document.write('<script src="scenes.js?v=' + Date.now() + '"><\/script>');</script>
 <script>
-let scene, camera, renderer, sphere, currentTexture;
+let scene, camera, renderer, cssRenderer, sphere, currentTexture;
 let lon = 0, lat = 0;
 let isDragging = false;
 let prevX = 0, prevY = 0;
@@ -276,6 +281,7 @@ const MIN_FOV = 25, MAX_FOV = 100;
 let currentSceneId = null;
 let currentHotspots = [];
 let currentInfoBoxes = [];
+let infoBoxObjects = []; // CSS3DObjects actually added to the scene, tracked separately from currentInfoBoxes so the previous scene's objects can always be found and removed, even after currentInfoBoxes has already been swapped to the new scene's array
 let currentHeadingOffset = 0;
 let showLiveCoords = false;
 const raycaster = new THREE.Raycaster();
@@ -296,6 +302,19 @@ function init() {
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
   container.appendChild(renderer.domElement);
+
+  // Renders info boxes as real 3D objects sharing this same scene/camera
+  // (see renderInfoBoxes). Sits visually on top of the WebGL canvas;
+  // pointer-events stays off at this container level so it never blocks
+  // dragging the panorama — only the actual marker/panel elements inside
+  // re-enable pointer-events on themselves.
+  cssRenderer = new THREE.CSS3DRenderer();
+  cssRenderer.setSize(window.innerWidth, window.innerHeight);
+  cssRenderer.domElement.style.position = 'absolute';
+  cssRenderer.domElement.style.top = '0';
+  cssRenderer.domElement.style.left = '0';
+  cssRenderer.domElement.style.pointerEvents = 'none';
+  container.appendChild(cssRenderer.domElement);
 
   const geometry = new THREE.SphereGeometry(500, 60, 40);
   geometry.scale(-1, 1, 1); // invert so texture is visible from inside
@@ -468,16 +487,15 @@ function onResize() {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
+  cssRenderer.setSize(window.innerWidth, window.innerHeight);
 }
 
 // --- Shared photo-anchoring math ---
-// Converts a stored (lon, lat) into the marker's current screen position,
+// Converts a stored (lon, lat) into its actual 3D position in the scene,
 // accounting for the scene's headingOffset the same way the sphere mesh
-// itself is rotated — so any marker built on this stays glued to the
-// same spot in the photo no matter what headingOffset is set to.
-// Returns null if the point is currently behind the camera.
-function projectPhotoAnchored(lon, lat) {
-  const w = window.innerWidth, hgt = window.innerHeight;
+// itself is rotated — so anything built on this stays glued to the same
+// spot in the photo no matter what headingOffset is set to.
+function photoAnchoredWorldPosition(lon, lat) {
   const offsetRad = THREE.MathUtils.degToRad(currentHeadingOffset);
   const cosO = Math.cos(offsetRad), sinO = Math.sin(offsetRad);
   const phi = THREE.MathUtils.degToRad(90 - lat);
@@ -486,19 +504,24 @@ function projectPhotoAnchored(lon, lat) {
   const localX = 500 * Math.sin(phi) * Math.cos(theta);
   const localY = 500 * Math.cos(phi);
   const localZ = 500 * Math.sin(phi) * Math.sin(theta);
-  const worldX = localX * cosO + localZ * sinO;
-  const worldZ = -localX * sinO + localZ * cosO;
-  // Compass-style bearing of this point in world space (same convention
-  // as the live view lon), used for the "faces you as you circle around
-  // it" counter-rotation on info boxes.
-  const worldLon = THREE.MathUtils.radToDeg(Math.atan2(worldZ, worldX));
-  const pos = new THREE.Vector3(worldX, localY, worldZ);
+  return new THREE.Vector3(
+    localX * cosO + localZ * sinO,
+    localY,
+    -localX * sinO + localZ * cosO
+  );
+}
+
+// 2D screen-space version, used by nav hotspots (simple flat markers
+// that stay a constant on-screen size — a UI element, not a 3D object).
+// Returns null if the point is currently behind the camera.
+function projectPhotoAnchored(lon, lat) {
+  const w = window.innerWidth, hgt = window.innerHeight;
+  const pos = photoAnchoredWorldPosition(lon, lat);
   const projected = pos.project(camera);
   if (projected.z > 1) return null; // behind the camera
   return {
     x: (projected.x * 0.5 + 0.5) * w,
-    y: (-projected.y * 0.5 + 0.5) * hgt,
-    worldLon: worldLon
+    y: (-projected.y * 0.5 + 0.5) * hgt
   };
 }
 
@@ -536,27 +559,49 @@ function projectHotspots() {
   });
 }
 
-// --- Info boxes: text panels pinned to a spot in the photo, open by
-// default (only the text is shown, no marker). Clicking the close
-// button collapses it to a small "i" marker at that same spot, which
+// --- Info boxes: text panels attached to a spot in the photo as real
+// 3D objects (via CSS3DObject) — not a 2D overlay — so perspective and
+// rotation as you look around come from the same camera that renders
+// the panorama, instead of an approximated CSS trick layered on top.
+//
+// Open by default (only the text shows, no marker). Clicking the close
+// button collapses it to a small "i" marker at the same spot, which
 // reopens the panel on click. No navigation, no "target" — a separate
-// concept from nav hotspots with its own attributes. An optional "tilt"
-// (degrees) rotates it around the horizontal axis to make it look laid
-// flat against the ground rather than floating upright — e.g. a sign or
-// marking attached to the street. It also gently counter-rotates as you
-// look around, as if it's a real object at that spot rather than a flat
-// screen-space sticker (see projectInfoBoxes). Scenes with none render
-// nothing. ---
+// concept from nav hotspots with its own attributes.
+//
+// "tilt" (degrees, default 90): 90 stands the box fully upright facing
+// you, like a normal readable sign; 0 lays it fully flat on the ground.
+// Values in between lean it back, e.g. a low sign or a marking on the
+// street viewed at an angle. "scale" (default 0.4) resizes it — CSS
+// pixel sizes are literal 3D units here, and the panorama sphere has a
+// radius of 500, so a scale well under 1 is normally needed to keep it
+// a reasonable on-screen size.
+//
+// Scenes with none render nothing.
 function renderInfoBoxes() {
-  const layer = document.getElementById('infobox-layer');
-  layer.innerHTML = '';
-  currentInfoBoxes.forEach(function (b) {
-    b._tilt = b.tilt || 0;
+  // Remove CSS3DObjects left over from whichever scene was loaded
+  // before this one. currentInfoBoxes has already been swapped to the
+  // new scene's array by this point, so it can't be used to find the
+  // previous scene's objects — infoBoxObjects tracks them separately.
+  infoBoxObjects.forEach(function (obj) { scene.remove(obj); });
+  infoBoxObjects = [];
 
-    const el = document.createElement('div');
-    el.className = 'infobox-marker';
-    el.textContent = 'i';
-    el.title = b.title || '';
+  currentInfoBoxes.forEach(function (b) {
+    const tiltDeg = (b.tilt !== undefined) ? b.tilt : 90;
+    const scaleVal = (b.scale !== undefined) ? b.scale : 1.2;
+
+    // Outer element: what CSS3DObject actually transforms in 3D.
+    // Marker and panel are absolutely positioned at its origin (0,0)
+    // and each center themselves via their own CSS transform, so both
+    // land on the object's exact registration point.
+    const outer = document.createElement('div');
+    outer.style.pointerEvents = 'none';
+
+    const marker = document.createElement('div');
+    marker.className = 'infobox-marker';
+    marker.textContent = 'i';
+    marker.title = b.title || '';
+    outer.appendChild(marker);
 
     const panel = document.createElement('div');
     panel.className = 'infobox-panel';
@@ -564,63 +609,56 @@ function renderInfoBoxes() {
       (b.title ? '<h4>' + b.title + '</h4>' : '') +
       '<span class="close-btn">✕</span>' +
       '<div>' + (b.text || '') + '</div>';
+    outer.appendChild(panel);
+
     panel.querySelector('.close-btn').addEventListener('click', function (e) {
       e.stopPropagation();
       b._open = false;
     });
-
-    el.addEventListener('click', function () {
+    marker.addEventListener('click', function () {
       b._open = !b._open;
     });
 
-    layer.appendChild(el);
-    layer.appendChild(panel);
-    b._el = el;
+    const worldPos = photoAnchoredWorldPosition(b.lon, b.lat);
+    const obj = new THREE.CSS3DObject(outer);
+    obj.position.copy(worldPos);
+    // Face the camera (which always sits at the origin — this viewer
+    // only ever rotates, never moves it) for a normal, legible
+    // orientation, then tip it toward horizontal by however far "tilt"
+    // asks for. This only needs computing once: neither the object's
+    // position nor the camera's position ever change, only its facing
+    // direction — which the CSS3DRenderer already accounts for every
+    // frame on its own.
+    obj.lookAt(camera.position);
+    obj.rotateX(THREE.MathUtils.degToRad(90 - tiltDeg));
+    obj.scale.set(scaleVal, scaleVal, scaleVal);
+    scene.add(obj);
+    infoBoxObjects.push(obj);
+
+    b._obj = obj;
+    b._marker = marker;
     b._panel = panel;
+    b._worldDir = worldPos.clone().normalize();
     // Open by default. This is the user's actual preference for the
-    // panel; whether it's currently ON SCREEN (facing that direction)
-    // is a separate, transient concern handled in projectInfoBoxes —
-    // being briefly off-screen must never reset this back to closed.
+    // panel; whether it's currently facing away from the camera is a
+    // separate, transient concern handled in updateInfoBoxVisibility —
+    // being briefly out of view must never reset this back to closed.
     b._open = true;
   });
 }
 
-// How far the box turns to "face" you as you circle away from it,
-// capped so it never flips edge-on or reverses. Degrees.
-const INFOBOX_MAX_COUNTER_ROTATE = 35;
-
-function projectInfoBoxes() {
+function updateInfoBoxVisibility() {
   if (!currentInfoBoxes.length) return;
+  const camDir = new THREE.Vector3();
+  camera.getWorldDirection(camDir);
   currentInfoBoxes.forEach(function (b) {
-    if (!b._el) return;
-    const p = projectPhotoAnchored(b.lon, b.lat);
-    if (!p) {
-      b._el.style.display = 'none';
-      b._panel.classList.remove('visible');
-      return;
-    }
-    // The box's compass bearing minus your current view direction: 0
-    // when you're looking straight at it (shown flat-on), growing as
-    // you turn away — this is what makes it appear to rotate opposite
-    // to your own movement, like a real object fixed at that spot.
-    let diff = p.worldLon - lon;
-    diff = ((diff + 180) % 360 + 360) % 360 - 180; // normalize to -180..180
-    const counterRotate = THREE.MathUtils.clamp(-diff, -INFOBOX_MAX_COUNTER_ROTATE, INFOBOX_MAX_COUNTER_ROTATE);
-    const rotation = ' perspective(500px) rotateY(' + counterRotate.toFixed(1) + 'deg) rotateX(' + b._tilt + 'deg)';
-
-    b._el.style.transform = rotation;
-    b._panel.style.transform = 'translate(-50%, -50%)' + rotation;
-
-    // Marker and panel are mutually exclusive, both centered on the
-    // exact same anchored point: open shows just the text panel there,
-    // closed shows just the small "i" marker in its place.
-    b._el.style.display = b._open ? 'none' : 'flex';
-    b._el.style.left = p.x + 'px';
-    b._el.style.top = p.y + 'px';
-
-    b._panel.classList.toggle('visible', b._open);
-    b._panel.style.left = p.x + 'px';
-    b._panel.style.top = p.y + 'px';
+    if (!b._obj) return;
+    // CSS3DRenderer doesn't clip objects behind the camera the way
+    // WebGL does, so anything well outside the current view direction
+    // is hidden manually rather than left to render incorrectly.
+    const inView = camDir.dot(b._worldDir) > -0.1;
+    b._marker.style.display = (inView && !b._open) ? 'flex' : 'none';
+    b._panel.classList.toggle('visible', inView && b._open);
   });
 }
 
@@ -692,8 +730,9 @@ function animate() {
 
   camera.lookAt(target);
   renderer.render(scene, camera);
+  cssRenderer.render(scene, camera);
   projectHotspots();
-  projectInfoBoxes();
+  updateInfoBoxVisibility();
   updateLiveCoords();
 }
 
