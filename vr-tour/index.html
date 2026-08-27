@@ -289,8 +289,16 @@ let downX = 0, downY = 0;
 const CLICK_THRESHOLD = 6; // px of movement below which a pointer down/up counts as a click
 
 init();
-loadScene(START_SCENE);
+loadScene(getInitialSceneId());
 animate();
+
+// Lets you open any scene directly, e.g. panorama-viewer.html#some-scene-id,
+// instead of always starting at START_SCENE and clicking through hotspots —
+// handy while debugging one particular scene.
+function getInitialSceneId() {
+  const requested = decodeURIComponent(location.hash.slice(1));
+  return (requested && SCENES[requested]) ? requested : START_SCENE;
+}
 
 function init() {
   const container = document.getElementById('canvas-container');
@@ -352,6 +360,7 @@ function loadScene(id, entryLon, entryLat) {
     return;
   }
   currentSceneId = id;
+  history.replaceState(null, '', '#' + encodeURIComponent(id));
   currentHotspots = def.hotspots || [];
   currentInfoBoxes = def.infoBoxes || [];
   currentHeadingOffset = def.headingOffset || 0;
@@ -572,12 +581,26 @@ function projectHotspots() {
 // "tilt" (degrees, default 90): 90 stands the box fully upright facing
 // you, like a normal readable sign; 0 lays it fully flat on the ground.
 // Values in between lean it back, e.g. a low sign or a marking on the
-// street viewed at an angle. "scale" (default 0.4) resizes it — CSS
-// pixel sizes are literal 3D units here, and the panorama sphere has a
-// radius of 500, so a scale well under 1 is normally needed to keep it
-// a reasonable on-screen size.
+// street viewed at an angle. "yaw" (degrees, default 0) rotates it
+// around the vertical axis, away from its default of facing straight at
+// you — for a box that should sit flush against a wall angled away from
+// the camera instead of billboarding toward it. "push" (default 0)
+// moves it along however it's currently facing (after tilt/yaw) —
+// positive pushes it further away/into the scene, negative pulls it
+// closer; mainly useful after a nonzero "yaw", since an off-angle plane
+// at a fixed distance can show more of its geometric footprint than
+// intended (looking stretched or oversized) — pushing it further away
+// shrinks and properly foreshortens it. "scale" (default 1) is relative
+// to the current normal size — 0.5 for something smaller/set further
+// back, 2 for something larger/closer, etc.
 //
 // Scenes with none render nothing.
+// Actual 3D scale applied when a box's own "scale" is 1 (or omitted) —
+// this is the current default visual size. "scale" on a box is always
+// relative to this: 1 = today's normal size, 0.5 = half that (further
+// away / less prominent), 2 = double, etc.
+const INFOBOX_BASE_SCALE = 1.2;
+
 function renderInfoBoxes() {
   // Remove CSS3DObjects left over from whichever scene was loaded
   // before this one. currentInfoBoxes has already been swapped to the
@@ -588,7 +611,8 @@ function renderInfoBoxes() {
 
   currentInfoBoxes.forEach(function (b) {
     const tiltDeg = (b.tilt !== undefined) ? b.tilt : 90;
-    const scaleVal = (b.scale !== undefined) ? b.scale : 1.2;
+    const yawDeg = b.yaw || 0;
+    const scaleVal = INFOBOX_BASE_SCALE * ((b.scale !== undefined) ? b.scale : 1);
 
     // Outer element: what CSS3DObject actually transforms in 3D.
     // Marker and panel are absolutely positioned at its origin (0,0)
@@ -623,15 +647,33 @@ function renderInfoBoxes() {
     const obj = new THREE.CSS3DObject(outer);
     obj.position.copy(worldPos);
     // Face the camera (which always sits at the origin — this viewer
-    // only ever rotates, never moves it) for a normal, legible
-    // orientation, then tip it toward horizontal by however far "tilt"
-    // asks for. This only needs computing once: neither the object's
-    // position nor the camera's position ever change, only its facing
-    // direction — which the CSS3DRenderer already accounts for every
-    // frame on its own.
+    // only ever rotates, never moves it) as a starting orientation, then
+    // yaw it left/right around the vertical axis if it should instead
+    // face along a wall or surface angled away from straight-at-you,
+    // then tip it toward horizontal by however far "tilt" asks for.
+    // This only needs computing once: neither the object's position nor
+    // the camera's position ever change, only its facing direction —
+    // which the CSS3DRenderer already accounts for every frame on its
+    // own.
     obj.lookAt(camera.position);
+    obj.rotateY(THREE.MathUtils.degToRad(yawDeg));
     obj.rotateX(THREE.MathUtils.degToRad(90 - tiltDeg));
     obj.scale.set(scaleVal, scaleVal, scaleVal);
+    // "push": move the box along its own face-normal direction (the way
+    // it's actually facing after tilt/yaw, not the camera direction) —
+    // positive pushes it further away/into the scene, negative pulls it
+    // closer. Useful once yaw turns a box away from directly facing the
+    // camera: at a fixed distance-from-camera, an off-angle plane can
+    // show more of its full geometric footprint than intended (looking
+    // stretched or oversized); pushing it further away shrinks and
+    // properly foreshortens it, the way a real sign further down the
+    // wall would look smaller. Computed after rotation, since it needs
+    // the box's actual current facing direction, not its position alone.
+    const pushVal = b.push || 0;
+    if (pushVal) {
+      const faceDir = new THREE.Vector3(0, 0, 1).applyQuaternion(obj.quaternion);
+      obj.position.addScaledVector(faceDir, pushVal);
+    }
     scene.add(obj);
     infoBoxObjects.push(obj);
 
