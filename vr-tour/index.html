@@ -146,6 +146,78 @@
     background: rgba(255,255,255,1);
     transform: scale(1.08);
   }
+  /* Info box markers — a separate concept from nav hotspots, with its
+     own attributes (title/text) and no scene navigation. */
+  .infobox-marker {
+    position: absolute;
+    width: 34px;
+    height: 34px;
+    margin-left: -17px;
+    margin-top: -17px;
+    border-radius: 50%;
+    background: rgba(40,90,210,0.9);
+    border: 2px solid rgba(0,0,0,0.4);
+    box-shadow: 0 0 12px rgba(0,0,0,0.5);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    color: #fff;
+    font-weight: bold;
+    font-style: italic;
+    font-family: Georgia, 'Times New Roman', serif;
+    user-select: none;
+    pointer-events: auto;
+  }
+  .infobox-marker:hover {
+    background: rgba(40,90,210,1);
+  }
+  .infobox-panel {
+    position: absolute;
+    max-width: 260px;
+    background: rgba(0,0,0,0.5);
+    color: #fff;
+    padding: 26px 16px 14px;
+    border-radius: 8px;
+    font-size: 13px;
+    line-height: 1.55;
+    text-align: center;
+    pointer-events: auto;
+    display: none;
+    transform: translate(-50%, -50%);
+    transform-style: preserve-3d;
+    backface-visibility: hidden;
+    z-index: 6;
+  }
+  .infobox-panel.visible {
+    display: block;
+  }
+  .infobox-panel h4 {
+    margin: 0 0 6px 0;
+    font-size: 15px;
+    font-weight: 700;
+  }
+  .infobox-panel .close-btn {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    width: 22px;
+    height: 22px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.15);
+    cursor: pointer;
+    color: rgba(255,255,255,0.8);
+    font-size: 13px;
+    line-height: 1;
+  }
+  .infobox-panel .close-btn:hover {
+    background: rgba(255,255,255,0.3);
+    color: #fff;
+  }
   #coord-toast {
     position: fixed;
     left: 50%;
@@ -177,6 +249,7 @@
 <div id="error"></div>
 <div id="canvas-container"></div>
 <div id="hotspot-layer" style="position:fixed; top:0; left:0; width:100vw; height:100vh; pointer-events:none; z-index:4;"></div>
+<div id="infobox-layer" style="position:fixed; top:0; left:0; width:100vw; height:100vh; pointer-events:none; z-index:4;"></div>
 <div id="zoom-controls">
   <div class="zoom-btn" id="zoom-in">+</div>
   <div class="zoom-btn" id="zoom-out">−</div>
@@ -202,6 +275,7 @@ let fov = 90;
 const MIN_FOV = 25, MAX_FOV = 100;
 let currentSceneId = null;
 let currentHotspots = [];
+let currentInfoBoxes = [];
 let currentHeadingOffset = 0;
 let showLiveCoords = false;
 const raycaster = new THREE.Raycaster();
@@ -260,6 +334,7 @@ function loadScene(id, entryLon, entryLat) {
   }
   currentSceneId = id;
   currentHotspots = def.hotspots || [];
+  currentInfoBoxes = def.infoBoxes || [];
   currentHeadingOffset = def.headingOffset || 0;
   sphere.rotation.y = THREE.MathUtils.degToRad(currentHeadingOffset);
   // A hotspot can override which direction the new scene starts facing
@@ -282,6 +357,7 @@ function loadScene(id, entryLon, entryLat) {
       sphere.material.needsUpdate = true;
       document.getElementById('loading').style.display = 'none';
       renderHotspots();
+      renderInfoBoxes();
     },
     undefined,
     function () {
@@ -394,7 +470,41 @@ function onResize() {
   renderer.setSize(window.innerWidth, window.innerHeight);
 }
 
-// --- Hotspots (data-driven; scenes with none render nothing) ---
+// --- Shared photo-anchoring math ---
+// Converts a stored (lon, lat) into the marker's current screen position,
+// accounting for the scene's headingOffset the same way the sphere mesh
+// itself is rotated — so any marker built on this stays glued to the
+// same spot in the photo no matter what headingOffset is set to.
+// Returns null if the point is currently behind the camera.
+function projectPhotoAnchored(lon, lat) {
+  const w = window.innerWidth, hgt = window.innerHeight;
+  const offsetRad = THREE.MathUtils.degToRad(currentHeadingOffset);
+  const cosO = Math.cos(offsetRad), sinO = Math.sin(offsetRad);
+  const phi = THREE.MathUtils.degToRad(90 - lat);
+  const theta = THREE.MathUtils.degToRad(lon);
+  // Photo-local position (same frame click-to-log reports lon/lat in).
+  const localX = 500 * Math.sin(phi) * Math.cos(theta);
+  const localY = 500 * Math.cos(phi);
+  const localZ = 500 * Math.sin(phi) * Math.sin(theta);
+  const worldX = localX * cosO + localZ * sinO;
+  const worldZ = -localX * sinO + localZ * cosO;
+  // Compass-style bearing of this point in world space (same convention
+  // as the live view lon), used for the "faces you as you circle around
+  // it" counter-rotation on info boxes.
+  const worldLon = THREE.MathUtils.radToDeg(Math.atan2(worldZ, worldX));
+  const pos = new THREE.Vector3(worldX, localY, worldZ);
+  const projected = pos.project(camera);
+  if (projected.z > 1) return null; // behind the camera
+  return {
+    x: (projected.x * 0.5 + 0.5) * w,
+    y: (-projected.y * 0.5 + 0.5) * hgt,
+    worldLon: worldLon
+  };
+}
+
+// --- Nav hotspots: clickable markers that jump to another scene,
+// optionally facing entryLon/entryLat on arrival. Scenes with none
+// render nothing. ---
 function renderHotspots() {
   const layer = document.getElementById('hotspot-layer');
   layer.innerHTML = '';
@@ -413,35 +523,104 @@ function renderHotspots() {
 
 function projectHotspots() {
   if (!currentHotspots.length) return;
-  const w = window.innerWidth, hgt = window.innerHeight;
-  const offsetRad = THREE.MathUtils.degToRad(currentHeadingOffset);
-  const cosO = Math.cos(offsetRad), sinO = Math.sin(offsetRad);
   currentHotspots.forEach(function (h) {
     if (!h._el) return;
-    const phi = THREE.MathUtils.degToRad(90 - h.lat);
-    const theta = THREE.MathUtils.degToRad(h.lon);
-    // Photo-local position (same frame click-to-log reports lon/lat in).
-    const localX = 500 * Math.sin(phi) * Math.cos(theta);
-    const localY = 500 * Math.cos(phi);
-    const localZ = 500 * Math.sin(phi) * Math.sin(theta);
-    // Rotate by the scene's headingOffset (same rotation the sphere
-    // mesh itself has) to get the marker's actual current world
-    // position — so it stays glued to the same spot on the photo no
-    // matter what headingOffset is set to.
-    const pos = new THREE.Vector3(
-      localX * cosO + localZ * sinO,
-      localY,
-      -localX * sinO + localZ * cosO
-    );
-    const projected = pos.project(camera);
-    const behind = projected.z > 1;
-    if (behind) {
+    const p = projectPhotoAnchored(h.lon, h.lat);
+    if (!p) {
       h._el.style.display = 'none';
       return;
     }
     h._el.style.display = 'flex';
-    h._el.style.left = ((projected.x * 0.5 + 0.5) * w) + 'px';
-    h._el.style.top = ((-projected.y * 0.5 + 0.5) * hgt) + 'px';
+    h._el.style.left = p.x + 'px';
+    h._el.style.top = p.y + 'px';
+  });
+}
+
+// --- Info boxes: text panels pinned to a spot in the photo, open by
+// default (only the text is shown, no marker). Clicking the close
+// button collapses it to a small "i" marker at that same spot, which
+// reopens the panel on click. No navigation, no "target" — a separate
+// concept from nav hotspots with its own attributes. An optional "tilt"
+// (degrees) rotates it around the horizontal axis to make it look laid
+// flat against the ground rather than floating upright — e.g. a sign or
+// marking attached to the street. It also gently counter-rotates as you
+// look around, as if it's a real object at that spot rather than a flat
+// screen-space sticker (see projectInfoBoxes). Scenes with none render
+// nothing. ---
+function renderInfoBoxes() {
+  const layer = document.getElementById('infobox-layer');
+  layer.innerHTML = '';
+  currentInfoBoxes.forEach(function (b) {
+    b._tilt = b.tilt || 0;
+
+    const el = document.createElement('div');
+    el.className = 'infobox-marker';
+    el.textContent = 'i';
+    el.title = b.title || '';
+
+    const panel = document.createElement('div');
+    panel.className = 'infobox-panel';
+    panel.innerHTML =
+      (b.title ? '<h4>' + b.title + '</h4>' : '') +
+      '<span class="close-btn">✕</span>' +
+      '<div>' + (b.text || '') + '</div>';
+    panel.querySelector('.close-btn').addEventListener('click', function (e) {
+      e.stopPropagation();
+      b._open = false;
+    });
+
+    el.addEventListener('click', function () {
+      b._open = !b._open;
+    });
+
+    layer.appendChild(el);
+    layer.appendChild(panel);
+    b._el = el;
+    b._panel = panel;
+    // Open by default. This is the user's actual preference for the
+    // panel; whether it's currently ON SCREEN (facing that direction)
+    // is a separate, transient concern handled in projectInfoBoxes —
+    // being briefly off-screen must never reset this back to closed.
+    b._open = true;
+  });
+}
+
+// How far the box turns to "face" you as you circle away from it,
+// capped so it never flips edge-on or reverses. Degrees.
+const INFOBOX_MAX_COUNTER_ROTATE = 35;
+
+function projectInfoBoxes() {
+  if (!currentInfoBoxes.length) return;
+  currentInfoBoxes.forEach(function (b) {
+    if (!b._el) return;
+    const p = projectPhotoAnchored(b.lon, b.lat);
+    if (!p) {
+      b._el.style.display = 'none';
+      b._panel.classList.remove('visible');
+      return;
+    }
+    // The box's compass bearing minus your current view direction: 0
+    // when you're looking straight at it (shown flat-on), growing as
+    // you turn away — this is what makes it appear to rotate opposite
+    // to your own movement, like a real object fixed at that spot.
+    let diff = p.worldLon - lon;
+    diff = ((diff + 180) % 360 + 360) % 360 - 180; // normalize to -180..180
+    const counterRotate = THREE.MathUtils.clamp(-diff, -INFOBOX_MAX_COUNTER_ROTATE, INFOBOX_MAX_COUNTER_ROTATE);
+    const rotation = ' perspective(500px) rotateY(' + counterRotate.toFixed(1) + 'deg) rotateX(' + b._tilt + 'deg)';
+
+    b._el.style.transform = rotation;
+    b._panel.style.transform = 'translate(-50%, -50%)' + rotation;
+
+    // Marker and panel are mutually exclusive, both centered on the
+    // exact same anchored point: open shows just the text panel there,
+    // closed shows just the small "i" marker in its place.
+    b._el.style.display = b._open ? 'none' : 'flex';
+    b._el.style.left = p.x + 'px';
+    b._el.style.top = p.y + 'px';
+
+    b._panel.classList.toggle('visible', b._open);
+    b._panel.style.left = p.x + 'px';
+    b._panel.style.top = p.y + 'px';
   });
 }
 
@@ -514,6 +693,7 @@ function animate() {
   camera.lookAt(target);
   renderer.render(scene, camera);
   projectHotspots();
+  projectInfoBoxes();
   updateLiveCoords();
 }
 

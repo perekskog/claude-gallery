@@ -1,8 +1,27 @@
-// ---------------------------------------------------------------------
 // SCENES CONFIG
 // One entry per panorama. Add more scenes here as more equirectangular
 // images become available, and add hotspots (with a target scene id)
 // to link them into a tour. "image" is a path relative to panorama-viewer.html.
+//
+// TWO COORDINATE FRAMES — read this before setting any lon/lat below.
+// This viewer uses lon/lat in two different senses depending on where
+// they're used:
+//   - startLon/startLat and a hotspot's entryLon/entryLat describe a
+//     VIEWING DIRECTION. They ignore headingOffset, so once a scene is
+//     calibrated (see HEADING ALIGNMENT below), lon=0 means the same
+//     real-world direction in every scene.
+//   - A hotspot's own lon/lat describe a PHOTO-ANCHORED point (the exact
+//     spot in that image you clicked, e.g. a doorway). These marker
+//     positions automatically re-render according to headingOffset, so
+//     they stay glued to that same spot in the photo even if you tweak
+//     headingOffset afterward.
+// Click-to-log always reports a hotspot-style, photo-anchored lon/lat
+// for whatever you clicked — that's the right value to paste straight
+// into a hotspot's own lon/lat. If you instead want that same clicked
+// direction for a startLon/entryLon (a viewing direction), first make
+// sure the scene's headingOffset is already how you want it, then use
+// the value the viewer was already facing when you clicked (or click
+// dead-center of the view) rather than an off-center click reading.
 //
 // To find lon/lat values for a new hotspot: open the viewer, click the
 // spot on the panorama you want to link from — the exact coordinates
@@ -21,6 +40,15 @@
 // Both entryLon/entryLat are optional; omit to just use the scene's
 // startLon/startLat.
 //
+// INFO BOXES (separate from hotspots)
+// "infoBoxes" is its own array, next to "hotspots", for markers that
+// show a text panel instead of navigating anywhere. Each entry has its
+// own attributes: { lon, lat, title, text } — no "target", no
+// "label"/"entryLon" (those are hotspot-only). Clicking the marker
+// toggles a small panel showing title/text. Uses the same
+// photo-anchored lon/lat as hotspots (see above), so click-to-log works
+// identically for placing either kind.
+//
 // HEADING ALIGNMENT (headingOffset)
 // Each panorama was shot facing whatever direction the camera happened
 // to point, so lon=0 lands on a different real-world direction in every
@@ -28,11 +56,17 @@
 // "headingOffset" (degrees) rotates the raw image so you can make lon=0
 // mean the same real-world direction in every scene, e.g. "facing the
 // way you're walking" (with lon=180 then being "facing back the way
-// you came"). To calibrate a scene: pick a landmark visible in it that
-// you can also identify in a neighboring, already-calibrated scene,
-// click it in both, and adjust headingOffset until the reported lon in
-// the new scene lines up with the same real-world direction as in the
-// other scene. Defaults to 0 (no rotation) if omitted.
+// you came"), or true compass north. To calibrate a scene: pick a
+// landmark visible in it that you can also identify in a neighboring,
+// already-calibrated scene, click it in both (photo-anchored lon from
+// click-to-log), and adjust headingOffset until the direction that
+// landmark now appears at (when facing it, read the current view's
+// lon/lat) lines up with the same real-world direction as in the other
+// scene. Set headingOffset for a scene BEFORE placing its hotspots and
+// info boxes — their markers move with headingOffset changes to stay
+// pinned to the photo, but the exact numbers involved are easiest to
+// reason about if calibration is settled first. Defaults to 0 (no
+// rotation) if omitted.
 // ---------------------------------------------------------------------
 const SCENES = {
   "ostersund-gagata-10": {
@@ -49,6 +83,11 @@ const SCENES = {
     hotspots: [
       { lon: 245.7, lat: -1.1, label: "20", target: "ostersund-gagata-20", entryLon: 90, entryLat: 0  },
     ],
+    infoBoxes: [
+      // Example for future scenes (shows a text panel, no navigation):
+      // { lon: 200, lat: -5, title: "Gamla gata 10", text: "Byggnaden uppfördes ..." }
+      { lon: 244, lat: -23, title: "Gågatan/Prästgatan västerut", text: "", tilt:40 }
+    ]
   },
   "ostersund-gagata-20": {
     image: "ostersund-gagata-20.jpg",
