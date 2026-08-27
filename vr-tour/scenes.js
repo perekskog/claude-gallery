@@ -69,23 +69,37 @@
 // rotation) if omitted.
 // ---------------------------------------------------------------------
 const SCENES = {
-  "ostersund-gagata-10": {
+  "ostersund-gagata-00": {
     // "image" is a path relative to panorama-viewer.html. Requires this
     // page to be served over http(s) (e.g. a real web server) — opening
     // it directly as a local file:// page will be blocked by the browser.
-    image: "ostersund-gagata-10.jpg",
+    image: "ostersund-gagata-00.jpg",
     // Rotates the raw image so lon=0 faces a chosen consistent direction
     // (e.g. "down the street"). See HEADING ALIGNMENT note above.
-    headingOffset: 156.0,
+    headingOffset: 151.0,
     // Initial view direction in degrees (lon: 0-360, lat: -85 to 85)
-    startLon: 0,
+    startLon: 90,
     startLat: 0,
     hotspots: [
-      { lon: 245.7, lat: -1.1, label: "20", target: "ostersund-gagata-20", entryLon: 90, entryLat: 0  },
+      { lon: 239, lat: -1.1, label: "20", target: "ostersund-gagata-10", entryLon: 90, entryLat: 0  },
     ],
     infoBoxes: [
       // Example for future scenes (shows a text panel, no navigation):
       // { lon: 200, lat: -5, title: "Gamla gata 10", text: "Byggnaden uppfördes ..." }
+      { lon: 239, lat: -23, title: "Gågatan/Prästgatan västerut", text: "", tilt:150 },
+      { lon: 64, lat: -23, title: "Gågatan/Prästgatan österut", text: "", tilt:150 },
+    ]
+  },
+  "ostersund-gagata-10": {
+    image: "ostersund-gagata-10.jpg",
+    headingOffset: 156.0,
+    startLon: 0,
+    startLat: 0,
+    hotspots: [
+      { lon: 67, lat: -2.5, label: "", target: "ostersund-gagata-00", entryLon: -90, entryLat: 0 },
+      { lon: 245.7, lat: -1.1, label: "20", target: "ostersund-gagata-20", entryLon: 90, entryLat: 0  },
+    ],
+    infoBoxes: [
       { lon: 244, lat: -23, title: "Gågatan/Prästgatan västerut", text: "", tilt:150 },
       { lon: 64, lat: -23, title: "Gågatan/Prästgatan österut", text: "", tilt:150 },
       { lon: 338.0, lat: 15.6, title:"Gamla Domus", text:"", tilt:90 }
@@ -93,12 +107,26 @@ const SCENES = {
   },
   "ostersund-gagata-20": {
     image: "ostersund-gagata-20.jpg",
-    headingOffset: 112.0,
+    headingOffset: 117.0,
     startLon: 0,
     startLat: 0,
     hotspots: [
       { lon: 28, lat: -2.5, label: "", target: "ostersund-gagata-10", entryLon: -90, entryLat: 0 },
-      { lon: 206, lat: -0.6, label: "", target: "ostersund-gagata-50", entryLon: 90, entryLat: 0 },
+      { lon: 206, lat: -0.6, label: "", target: "ostersund-gagata-30", entryLon: 90, entryLat: 0 },
+    ],
+    infoBoxes: [
+      { lon: 206, lat: -23, title: "Gågatan/Prästgatan västerut", text: "", tilt:150 },
+      { lon: 26, lat: -23, title: "Gågatan/Prästgatan österut", text: "", tilt:150 }
+    ]
+  },
+    "ostersund-gagata-30": {
+    image: "ostersund-gagata-30.jpg",
+    headingOffset: 296.0,
+    startLon: 0,
+    startLat: 0,
+    hotspots: [
+      { lon: 28, lat: -2.5, label: "", target: "ostersund-gagata-50", entryLon: 90, entryLat: 0 },
+      { lon: 206, lat: -0.6, label: "", target: "ostersund-gagata-20", entryLon: -90, entryLat: 0 },
     ],
     infoBoxes: [
       { lon: 206, lat: -23, title: "Gågatan/Prästgatan västerut", text: "", tilt:150 },
@@ -111,12 +139,40 @@ const SCENES = {
     startLon: 0,
     startLat: 0,
     hotspots: [
-      { lon: 242.5, lat: -3.7, label: "", target: "ostersund-gagata-20", entryLon: -90, entryLat: 0 },
-      { lon: 63.7, lat: 1.1, label: "", target: "ostersund-gagata-80", entryLon: 90, entryLat: 0 },
+      { lon: 242.5, lat: -3.7, label: "", target: "ostersund-gagata-30", entryLon: -90, entryLat: 0 },
+      { lon: 63.7, lat: 1.1, label: "", target: "ostersund-gagata-60", entryLon: 90, entryLat: 0 },
     ],
     infoBoxes: [
       { lon: 63.7, lat: -23, title: "Gågatan/Prästgatan västerut", text: "", tilt:150 },
       { lon: 243.7, lat: -23, title: "Gågatan/Prästgatan österut", text: "", tilt:150 }
+    ]
+  },
+    "ostersund-gagata-60": {
+    image: "ostersund-gagata-60.jpg",
+    headingOffset: 347.0,
+    startLon: 0,
+    startLat: 0,
+    hotspots: [
+      { lon: 255, lat: -3.7, label: "", target: "ostersund-gagata-50", entryLon: -90, entryLat: 0 },
+      { lon: 77, lat: 1.1, label: "", target: "ostersund-gagata-70", entryLon: 90, entryLat: 0 },
+    ],
+    infoBoxes: [
+      { lon: 77, lat: -23, title: "Gågatan/Prästgatan västerut", text: "", tilt:150 },
+      { lon: 255, lat: -23, title: "Gågatan/Prästgatan österut", text: "", tilt:150 }
+    ]
+  },
+    "ostersund-gagata-70": {
+    image: "ostersund-gagata-70.jpg",
+    headingOffset: 301.0,
+    startLon: 0,
+    startLat: 0,
+    hotspots: [
+      { lon: 211, lat: -3.7, label: "", target: "ostersund-gagata-60", entryLon: -90, entryLat: 0 },
+      { lon: 33, lat: 1.1, label: "", target: "ostersund-gagata-80", entryLon: 90, entryLat: 0 },
+    ],
+    infoBoxes: [
+      { lon: 33, lat: -23, title: "Gågatan/Prästgatan västerut", text: "", tilt:150 },
+      { lon: 211, lat: -23, title: "Gågatan/Prästgatan österut", text: "", tilt:150 }
     ]
   },
   "ostersund-gagata-80": {
@@ -125,7 +181,7 @@ const SCENES = {
     startLon: 0,
     startLat: 0,
     hotspots: [
-      { lon: 349.1, lat: -1.4, label: "", target: "ostersund-gagata-50", entryLon: -90, entryLat: 0 },
+      { lon: 349.1, lat: -1.4, label: "", target: "ostersund-gagata-70", entryLon: -90, entryLat: 0 },
       { lon: 169.5, lat: -1.0, label: "", target: "ostersund-gagata-90", entryLon: 90, entryLat: 0 },
     ],
     infoBoxes: [
@@ -136,18 +192,32 @@ const SCENES = {
   "ostersund-gagata-90": {
     image: "ostersund-gagata-90.jpg",
     headingOffset: 244.0,
-    startLon: 303,
+    startLon: 0,
     startLat: 0,
     hotspots: [
       { lon: 155.3, lat: 0.3, label: "", target: "ostersund-gagata-80", entryLon: -90, entryLat: 0 },
+      { lon: 333, lat: -1.0, label: "", target: "ostersund-gagata-a0", entryLon: 90, entryLat: 0 },
     ],
     infoBoxes: [
       { lon: 333, lat: -23, title: "Gågatan/Prästgatan västerut", text: "", tilt:150 },
       { lon: 153, lat: -23, title: "Gågatan/Prästgatan österut", text: "", tilt:150 },
       { lon: 240, lat: -5, title: "Cantina", text:"Bästa restaurangen!", tilt:90, yaw: 70, scale:0.8, push:-60 },
-      { lon: 330.9, lat: -0.1, title: "Vårat hotell", text:"", tilt:90, scale:0.7 },
+    ]
+  },
+  "ostersund-gagata-a0": {
+    image: "ostersund-gagata-a0.jpg",
+    headingOffset: 60.0,
+    startLon: 0,
+    startLat: 0,
+    hotspots: [
+      { lon: 324, lat: 0.3, label: "", target: "ostersund-gagata-90", entryLon: -90, entryLat: 0 },
+    ],
+    infoBoxes: [
+      { lon: 146, lat: -23, title: "Gågatan/Prästgatan västerut", text: "", tilt:150 },
+      { lon: 324, lat: -23, title: "Gågatan/Prästgatan österut", text: "", tilt:150 },
+      { lon: 141, lat: 4.7, title: "Vårat hotell", text:"", tilt:90, scale:0.7 },
     ]
   },
 };
 
-const START_SCENE = "ostersund-gagata-90";
+const START_SCENE = "ostersund-gagata-10";
