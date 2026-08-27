@@ -136,7 +136,7 @@ const SCENES = {
   "ostersund-gagata-90": {
     image: "ostersund-gagata-90.jpg",
     headingOffset: 244.0,
-    startLon: 0,
+    startLon: 303,
     startLat: 0,
     hotspots: [
       { lon: 155.3, lat: 0.3, label: "", target: "ostersund-gagata-80", entryLon: -90, entryLat: 0 },
@@ -144,10 +144,10 @@ const SCENES = {
     infoBoxes: [
       { lon: 333, lat: -23, title: "Gågatan/Prästgatan västerut", text: "", tilt:150 },
       { lon: 153, lat: -23, title: "Gågatan/Prästgatan österut", text: "", tilt:150 },
-      { lon: 240, lat: -5, title: "Cantina", text:"Bästa restaurangen!", tilt:90, yaw: 70, scale:1.4, push:-60 },
+      { lon: 240, lat: -5, title: "Cantina", text:"Bästa restaurangen!", tilt:90, yaw: 70, scale:0.8, push:-60 },
       { lon: 330.9, lat: -0.1, title: "Vårat hotell", text:"", tilt:90, scale:0.7 },
     ]
   },
 };
 
-const START_SCENE = "ostersund-gagata-10";
+const START_SCENE = "ostersund-gagata-90";
